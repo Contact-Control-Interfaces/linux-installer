@@ -1,0 +1,6 @@
+dist/
+notes.md
+smoke
+.idea/
+.vscode/
+.DS_Store

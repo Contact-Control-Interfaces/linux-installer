@@ -1,0 +1,194 @@
+# linux-installer - GitHub Actions
+#
+# Collects the component releases pinned in bundle.yaml, installs them on every
+# supported distro and architecture, and republishes the same files as one
+# release. Nothing is built here. Versions follow the dev-handbook
+# (releases/versioning.md); this repo has no staging branch, so release
+# candidates are tagged on main:
+#
+#   pull request, manual run          X.Y.Z-ci.N     workflow artifacts only
+#   tag vX.Y.Z-rc.N on main           X.Y.Z-rc.N     GitHub prerelease
+#   tag vX.Y.Z on main                X.Y.Z          GitHub release
+#
+# X.Y.Z is the VERSION file. A tag must match it and sit on main, and a stable
+# tag may pin only stable components (tools/plan.sh).
+#
+# Repository settings this reads:
+#   vars.SUBMODULE_APP_ID and secrets.SUBMODULE_APP_PRIVATE_KEY
+#                         GitHub App that can read the linux-service and
+#                         manager releases, which are not public
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # The version, and every check that must fail before anything is downloaded.
+  # ---------------------------------------------------------------------------
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      ready: ${{ steps.plan.outputs.ready }}
+      core_tag: ${{ steps.plan.outputs.core_tag }}
+      service_tag: ${{ steps.plan.outputs.service_tag }}
+      manager_tag: ${{ steps.plan.outputs.manager_tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+        with:
+          fetch-depth: 0          # main and every tag, for the branch gate
+          persist-credentials: false
+
+      - name: Plan the bundle
+        id: plan
+        run: tools/plan.sh
+
+  # ---------------------------------------------------------------------------
+  # Download the pinned assets and check them against the checksums their own
+  # releases published. Skipped on a pull request from a fork, which has no
+  # access to the App.
+  # ---------------------------------------------------------------------------
+  collect:
+    needs: plan
+    if: >-
+      needs.plan.outputs.ready == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Component token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2
+        with:
+          app-id: ${{ vars.SUBMODULE_APP_ID }}
+          private-key: ${{ secrets.SUBMODULE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            legacycore
+            linux-service
+            manager
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Collect and verify
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: tools/collect.sh dist
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: bundle
+          path: dist/
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Install the bundle on each supported machine as the README says, and open
+  # a Session through Core against the running Service. The -arm runners are
+  # native arm64, for Jetson.
+  # ---------------------------------------------------------------------------
+  verify:
+    needs: [plan, collect]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-22.04-arm, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093   # v4.3.0
+        with:
+          name: bundle
+          path: dist
+
+      - name: Install and check
+        env:
+          SERVICE_TAG: ${{ needs.plan.outputs.service_tag }}
+        run: tools/verify-install.sh dist "${SERVICE_TAG#v}"
+
+  # ---------------------------------------------------------------------------
+  # Tags only: a prerelease for vX.Y.Z-rc.N, a release for vX.Y.Z, with the
+  # exact files `verify` installed.
+  # ---------------------------------------------------------------------------
+  release:
+    if: github.ref_type == 'tag'
+    needs: [plan, collect, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093   # v4.3.0
+        with:
+          name: bundle
+          path: dist
+
+      - name: Write the notes
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          CORE_TAG: ${{ needs.plan.outputs.core_tag }}
+          SERVICE_TAG: ${{ needs.plan.outputs.service_tag }}
+          MANAGER_TAG: ${{ needs.plan.outputs.manager_tag }}
+        run: |
+          {
+            echo "## Contact CI for Linux $VERSION"
+            echo
+            echo "| Component | Version |"
+            echo "| -- | -- |"
+            echo "| Core (\`libcontactci-core\`) | ${CORE_TAG#v} |"
+            echo "| Service (\`contactci-service\`) | ${SERVICE_TAG#v} |"
+            [ -z "$MANAGER_TAG" ] || echo "| Manager (\`contactci-manager\`) | ${MANAGER_TAG#v} |"
+            echo
+            echo "Download the files whose names end with your machine's suffix, then follow the [README](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/README.md#install):"
+            echo
+            echo "| Machine | Ubuntu | Suffix |"
+            echo "| -- | -- | -- |"
+            echo "| amd64 | 22.04 | \`_ubuntu22.04_amd64\` |"
+            echo "| amd64 | 24.04 | \`_ubuntu24.04_amd64\` |"
+            echo "| Jetson Orin on JetPack 6 | 22.04 | \`_ubuntu22.04_arm64\` |"
+            echo "| Jetson Orin on JetPack 7.2, or Jetson Thor | 24.04 | \`_ubuntu24.04_arm64\` |"
+            echo
+            echo "### Checksums (SHA256)"
+            echo
+            echo '```'
+            cat dist/SHA256SUMS.txt
+            echo '```'
+          } > notes.md
+          cat notes.md
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+        run: |
+          args=(--title "Contact CI for Linux $VERSION" --notes-file notes.md --verify-tag)
+          [ "$PRERELEASE" = true ] && args+=(--prerelease)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* "${args[@]}"
+          fi
