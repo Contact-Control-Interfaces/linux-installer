@@ -84,7 +84,7 @@ Use `purge` to drop the Service's systemd state as well. The `contactci` user an
 
 ## Licence and support
 
-The packages are proprietary software, distributed under the [Contact CI SDK EULA](https://contact.ci/pages/sdk-eula). Third-party components and their licences are listed in `/usr/share/doc/` for each installed package. See [LICENSE.md](LICENSE.md).
+The packages are proprietary software, distributed under the Contact CI SDK EULA. Third-party components and their licences are listed in `/usr/share/doc/` for each installed package. See [LICENSE.md](LICENSE.md).
 
 Questions and problems: support@contactci.co.
 
