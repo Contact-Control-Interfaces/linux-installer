@@ -1,0 +1,17 @@
+# One tested set of component releases. A bundle release republishes exactly
+# the files attached to these tags; nothing is rebuilt.
+#
+# `tag` is a release tag in `repo`. Core and the Service are required before a
+# bundle can be tagged; the Manager is optional. Leave `tag` empty for a
+# component that has no release to pin yet. A stable bundle (vX.Y.Z) may only
+# pin stable component tags.
+components:
+  core:
+    repo: Contact-Control-Interfaces/legacycore
+    tag: v3.0.3-rc.5
+  service:
+    repo: Contact-Control-Interfaces/linux-service
+    tag: ""
+  manager:
+    repo: Contact-Control-Interfaces/manager
+    tag: ""
