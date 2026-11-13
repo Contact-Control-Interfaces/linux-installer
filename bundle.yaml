@@ -8,7 +8,7 @@
 components:
   core:
     repo: Contact-Control-Interfaces/legacycore
-    tag: v3.0.3-rc.5
+    tag: v3.0.3
   service:
     repo: Contact-Control-Interfaces/linux-service
     tag: ""
