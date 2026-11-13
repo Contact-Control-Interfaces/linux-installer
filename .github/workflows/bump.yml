@@ -1,0 +1,78 @@
+# linux-installer - GitHub Actions
+#
+# Proposes newer pins. Once a day, and on a manual run, tools/bump.sh looks for
+# a stable release of each component that is later than its pin in bundle.yaml
+# and has Linux packages. When it finds one, this workflow opens (or updates)
+# one pull request from the branch bump/stable-pins and starts the release
+# workflow on it, which installs the new set on every supported machine.
+#
+# It never pins a release candidate, never merges and never publishes: a
+# person merges the pull request, and a release still needs a tag.
+#
+# To decline a bump, close the pull request and keep its branch: the same pins
+# are not proposed again while the branch holds them. A bump branch that
+# someone has added commits to is never overwritten: newer pins are announced
+# in a comment on its pull request instead (tools/propose.sh).
+#
+# GitHub turns scheduled workflows off in a repository with no activity for 60
+# days. Turn it back on from the Actions tab, or run it by hand.
+#
+# Repository settings this reads:
+#   vars.SUBMODULE_APP_ID and secrets.SUBMODULE_APP_PRIVATE_KEY
+#                         GitHub App that can read the linux-service and
+#                         manager releases, which are not public
+name: bump
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write         # push the bump branch
+      pull-requests: write    # open or update its pull request
+      actions: write          # start the release workflow on the branch
+    steps:
+      - name: Component token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2
+        with:
+          app-id: ${{ vars.SUBMODULE_APP_ID }}
+          private-key: ${{ secrets.SUBMODULE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            legacycore
+            linux-service
+            manager
+
+      # Always main, whichever branch a manual run was started from. Keeps the
+      # workflow token in the checkout: the last step pushes with it. All of
+      # history, so that step can tell whose commits are on the bump branch.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Look for newer stable releases
+        id: bump
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: tools/bump.sh "$RUNNER_TEMP/body.md"
+
+      - name: Open or update the pull request
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ steps.bump.outputs.title }}
+        run: tools/propose.sh "$TITLE" "$RUNNER_TEMP/body.md"
