@@ -106,4 +106,4 @@ Tags and versions are permanent: a broken release candidate is fixed by the next
 
 Once a day the [`bump` workflow](.github/workflows/bump.yml) looks for a stable release of each component that is later than its pin and has Linux packages. When it finds one it opens a pull request from the branch `bump/stable-pins` that moves the pin, and starts the `release` workflow on it. It never pins a release candidate, never merges and never publishes: pin a release candidate by hand, and tag a release as above.
 
-To decline a bump, close its pull request and keep the branch: the same pins are not proposed again while the branch holds them. [`tools/bump.sh`](tools/bump.sh) does the same edit locally.
+To decline a bump, close its pull request and keep the branch: the same pins are not proposed again while the branch holds them. If you add commits to a bump pull request, for example to change `VERSION`, the workflow stops rewriting that branch: newer pins are announced in a comment instead, and [`tools/bump.sh`](tools/bump.sh) run on the branch takes them.

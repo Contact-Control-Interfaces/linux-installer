@@ -10,7 +10,9 @@
 # person merges the pull request, and a release still needs a tag.
 #
 # To decline a bump, close the pull request and keep its branch: the same pins
-# are not proposed again while the branch holds them.
+# are not proposed again while the branch holds them. A bump branch that
+# someone has added commits to is never overwritten: newer pins are announced
+# in a comment on its pull request instead (tools/propose.sh).
 #
 # GitHub turns scheduled workflows off in a repository with no activity for 60
 # days. Turn it back on from the Actions tab, or run it by hand.
@@ -33,9 +35,6 @@ concurrency:
   group: bump
   cancel-in-progress: false
 
-env:
-  BRANCH: bump/stable-pins
-
 jobs:
   bump:
     runs-on: ubuntu-24.04
@@ -57,8 +56,13 @@ jobs:
             linux-service
             manager
 
-      # Keeps the workflow token in the checkout: the last step pushes with it.
+      # Always main, whichever branch a manual run was started from. Keeps the
+      # workflow token in the checkout: the last step pushes with it. All of
+      # history, so that step can tell whose commits are on the bump branch.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+        with:
+          ref: main
+          fetch-depth: 0
 
       - name: Look for newer stable releases
         id: bump
@@ -71,25 +75,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TITLE: ${{ steps.bump.outputs.title }}
-        run: |
-          if git fetch --quiet origin "$BRANCH" 2>/dev/null && git diff --quiet FETCH_HEAD -- bundle.yaml; then
-            echo "$BRANCH already holds these pins. Nothing to do."
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch --quiet --create "$BRANCH"
-          git commit --quiet --all --message "$TITLE"
-          git push --quiet --force origin "$BRANCH"
-
-          if [ -n "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
-            gh pr edit "$BRANCH" --title "$TITLE" --body-file "$RUNNER_TEMP/body.md"
-          else
-            gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file "$RUNNER_TEMP/body.md"
-          fi
-
-          # A pull request opened with the workflow token starts no workflows,
-          # so the install check is started here. Its result shows on the pull
-          # request, against the same commit.
-          gh workflow run release.yml --ref "$BRANCH"
+        run: tools/propose.sh "$TITLE" "$RUNNER_TEMP/body.md"
