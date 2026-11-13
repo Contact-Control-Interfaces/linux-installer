@@ -11,7 +11,7 @@ components:
     tag: v3.0.3
   service:
     repo: Contact-Control-Interfaces/linux-service
-    tag: ""
+    tag: v0.1.0
   manager:
     repo: Contact-Control-Interfaces/manager
-    tag: ""
+    tag: v2.2.2
