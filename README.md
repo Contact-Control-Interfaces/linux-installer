@@ -86,6 +86,8 @@ The packages are proprietary software, distributed under the Contact CI SDK EULA
 
 Questions and problems: support@contactci.co.
 
+Security problems: see [SECURITY.md](SECURITY.md).
+
 ## For maintainers: cutting a release
 
 This repository builds nothing. [`bundle.yaml`](bundle.yaml) pins one release tag of each component, and the [`release` workflow](.github/workflows/release.yml) downloads those releases' files, checks them against the checksums each release published, installs them on every supported machine, opens a Session through Core against the running Service, and republishes the same files.
