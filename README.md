@@ -9,8 +9,6 @@ Contact CI software for Linux, as `.deb` packages for Ubuntu on amd64 and arm64.
 | `libcontactci-core-dev` | The C API header (`contactci.h`) and the `libccic.so` link, for building your own application. |
 | `contactci-manager` | The Manager: a desktop application that shows the Service, gloves and connected applications. Not in every release. |
 
-> **Status:** no release has been published yet.
-
 ## Supported machines
 
 | Machine | Ubuntu | File suffix |
