@@ -13,10 +13,16 @@
 # X.Y.Z is the VERSION file. A tag must match it and sit on main, and a stable
 # tag may pin only stable components (tools/plan.sh).
 #
+# After a tag's GitHub release, the `linear` job records the bundle in
+# Linear's Linux SDK release pipeline (tools/linear.sh).
+#
 # Repository settings this reads:
 #   vars.SUBMODULE_APP_ID and secrets.SUBMODULE_APP_PRIVATE_KEY
 #                         GitHub App that can read the linux-service and
 #                         manager releases, which are not public
+#   secrets.LINEAR_ACCESS_KEY
+#                         the Linux SDK pipeline's access key; without it the
+#                         `linear` job is skipped
 name: release
 
 on:
@@ -192,3 +198,66 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" dist/* "${args[@]}"
           fi
+
+  # ---------------------------------------------------------------------------
+  # Tags only, once the GitHub release exists: an rc adds the issues this
+  # bundle brings in to Linear release X.Y.Z, and vX.Y.Z completes it
+  # (tools/linear.sh). Linear is bookkeeping, so this job never fails the
+  # release, and it is skipped while the access key is unset.
+  # ---------------------------------------------------------------------------
+  linear:
+    if: github.ref_type == 'tag'
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - name: Check for the access key
+        id: key
+        env:
+          LINEAR_ACCESS_KEY: ${{ secrets.LINEAR_ACCESS_KEY }}
+        run: |
+          if [ -n "$LINEAR_ACCESS_KEY" ]; then
+            echo "set=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::secrets.LINEAR_ACCESS_KEY is not set, so this bundle is not recorded in Linear."
+          fi
+
+      - name: Component token
+        id: app-token
+        if: steps.key.outputs.set == 'true'
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349   # v2.2.2
+        with:
+          app-id: ${{ vars.SUBMODULE_APP_ID }}
+          private-key: ${{ secrets.SUBMODULE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            legacycore
+            linux-service
+            manager
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+        if: steps.key.outputs.set == 'true'
+        with:
+          fetch-depth: 0          # every tag, to find the previous stable bundle
+          persist-credentials: false
+
+      # Pinned and checked against the checksum Linear published, like any
+      # other tool this workflow runs
+      - name: Install linear-release
+        if: steps.key.outputs.set == 'true'
+        env:
+          LINEAR_RELEASE_VERSION: v0.18.0
+          LINEAR_RELEASE_SHA256: 0476bc8b8c23c1ed3150a55fdeb17c91d6cafcdf5f52dab74b4f89539b3c374a
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/linear-release" \
+            "https://github.com/linear/linear-release/releases/download/$LINEAR_RELEASE_VERSION/linear-release-linux-x64"
+          echo "$LINEAR_RELEASE_SHA256  $RUNNER_TEMP/linear-release" | sha256sum --check --strict
+          chmod +x "$RUNNER_TEMP/linear-release"
+
+      - name: Record the bundle in Linear
+        if: steps.key.outputs.set == 'true'
+        env:
+          LINEAR_ACCESS_KEY: ${{ secrets.LINEAR_ACCESS_KEY }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: tools/linear.sh "$RUNNER_TEMP/linear-release"
